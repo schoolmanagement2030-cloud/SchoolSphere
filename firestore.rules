@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. सहायक फंक्शन (Helper Functions)
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // 2. स्कूल डेटा (Schools)
+    match /schools/{schoolId} {
+      // कोई भी लॉगिन यूजर स्कूल देख सकता है, लेकिन केवल 'superadmin' बना सकता है
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && getUserData().role == 'superadmin';
+    }
+
+    // 3. यूजर प्रोफाइल (Users)
+    match /users/{userId} {
+      // यूजर अपना प्रोफाइल देख/बदल सकता है, एडमिन सबको देख सकता है
+      allow read, write: if isAuthenticated() && (request.auth.uid == userId || getUserData().role == 'superadmin');
+    }
+
+    // 4. बस लोकेशन (Locations)
+    match /locations/{busId} {
+      // केवल उसी स्कूल के लोग लोकेशन देख सकते हैं
+      allow read: if isAuthenticated() && resource.data.schoolId == getUserData().schoolId;
+      // केवल ड्राइवर या ओनर ही लोकेशन अपडेट कर सकते हैं
+      allow write: if isAuthenticated() && (getUserData().role == 'driver' || getUserData().role == 'owner');
+    }
+
+    // 5. छात्र और प्रवेश (Students/Admissions)
+    match /students/{studentId} {
+      // एडमिशन फॉर्म कोई भी भर सकता है (Public), लेकिन डेटा केवल स्कूल स्टाफ देख सकता है
+      allow create: if true; 
+      allow read, update, delete: if isAuthenticated() && (getUserData().schoolId == resource.data.schoolId || getUserData().role == 'superadmin');
+    }
+
+    // 6. खर्च और रसीदें (Expenses)
+    match /expenses/{expenseId} {
+      // केवल अकाउंटेंट या ओनर ही देख और लिख सकते हैं
+      allow read, write: if isAuthenticated() && (getUserData().role == 'accountant' || getUserData().role == 'owner') && getUserData().schoolId == resource.data.schoolId;
+    }
+  }
+}
